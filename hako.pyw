@@ -218,6 +218,56 @@ def get_all_known_avatars(dest_path: Path | None = None) -> set[str]:
 # UTILITY HELPERS
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# SAFE WINDOWS RECYCLE BIN DELETION (NO ACCIDENTAL DATA LOSS)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def safe_recycle(path: Path) -> bool:
+    """
+    Safely moves a file or directory to the Windows Recycle Bin so it can always be restored.
+    Falls back gracefully to standard delete if Recycle Bin is unsupported.
+    """
+    if not path.exists():
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("wFunc", wintypes.UINT),
+                ("pFrom", wintypes.LPCWSTR),
+                ("pTo", wintypes.LPCWSTR),
+                ("fFlags", wintypes.WORD),
+                ("fAnyOperationsAborted", wintypes.BOOL),
+                ("hNameMappings", wintypes.LPVOID),
+                ("lpszProgressTitle", wintypes.LPCWSTR),
+            ]
+
+        FO_DELETE = 0x0003
+        FOF_ALLOWUNDO = 0x0040       # Send to Recycle Bin
+        FOF_NOCONFIRMATION = 0x0010  # Silent (no extra OS dialog)
+        FOF_SILENT = 0x0004
+
+        p_from = str(path.resolve()) + "\0\0"
+        fileop = SHFILEOPSTRUCTW()
+        fileop.wFunc = FO_DELETE
+        fileop.pFrom = p_from
+        fileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+        res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(fileop))
+        return res == 0
+    except Exception:
+        try:
+            if path.is_file():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            return True
+        except Exception:
+            return False
+
+
 def _is_subpath(p: Path, parent: Path) -> bool:
     """Return True if p is inside parent directory."""
     try:
@@ -1079,11 +1129,11 @@ def run_sort(
     dry_run: bool,
     log: Callable[[str], None],
     on_progress: Callable[[float], None] | None = None,
-) -> None:
+) -> list[Path]:
     items = find_assets_to_sort(source, dest)
     if not items:
         log(f"{_E['warn']} No .zip, .unitypackage, or .unity files found in {source}")
-        return
+        return []
 
     n_zip = sum(1 for p in items if p.suffix.lower() == ".zip")
     n_pkg = sum(1 for p in items if p.suffix.lower() == ".unitypackage")
@@ -1131,6 +1181,7 @@ def run_sort(
             if valid_cats:
                 family_consensus[p_low] = Counter(valid_cats).most_common(1)[0][0]
 
+    successful_items: list[Path] = []
     total = len(pre_data)
     for idx, data in enumerate(pre_data):
         item = data["item"]
@@ -1152,6 +1203,7 @@ def run_sort(
         try:
             process_entry(item, dest, dry_run, log, cat_override=cat, source_root=source,
                           pre_inspected=data["info"], override_reason=reason)
+            successful_items.append(item)
         except Exception as exc:
             log(f"  {_E['error']} Unexpected error on {item.name}: {exc}")
         if on_progress:
@@ -1161,6 +1213,8 @@ def run_sort(
         log(f"\n{_E['done']} Preview scan complete! Ready to sort.")
     else:
         log(f"\n{_E['done']} All done! Check your library at: {dest}")
+
+    return successful_items
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1498,17 +1552,32 @@ def launch_gui() -> None:
             running.set()
             app.after(0, lambda: sort_single_btn.configure(
                 state="disabled", text="Sorting… ⏳", fg_color=_PALETTE["muted"]))
+            succeeded = False
             try:
                 p_base, _, _ = extract_product_and_variant(item_path.stem, dest_path=dest_path)
                 record_learned_product(p_base, cat, dest_path)
                 log(f"  {_E['info']} Remembered in memory: '{p_base}' -> {cat}")
                 process_entry(item_path, dest_path, dry_run=False, log=log, cat_override=cat)
+                succeeded = True
             except Exception as exc:
                 log(f"  {_E['error']} Unexpected error: {exc}")
             finally:
                 running.clear()
                 app.after(0, lambda: sort_single_btn.configure(
                     state="normal", text="Sort This File  ✨", fg_color=_PALETTE["accent_mint"]))
+
+            if succeeded and item_path.exists():
+                def _prompt_single_cleanup():
+                    ans = messagebox.askyesno(
+                        "Nyahako 🐾 — Clean Up Original?",
+                        f"🌸 Successfully sorted '{item_path.name}'!\n\n"
+                        f"Would you like to send the original file to the Recycle Bin to save disk space?\n\n"
+                        f"(You can restore it anytime from your Recycle Bin! 🗑️)"
+                    )
+                    if ans:
+                        if safe_recycle(item_path):
+                            log(f"  🗑️  Moved original '{item_path.name}' to Recycle Bin.")
+                app.after(120, _prompt_single_cleanup)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1558,8 +1627,9 @@ def launch_gui() -> None:
             def on_prog(frac: float):
                 app.after(0, lambda: progress_bar.set(frac))
 
+            sorted_items = []
             try:
-                run_sort(source_path, dest_path, dry_run=dry_run, log=log, on_progress=on_prog)
+                sorted_items = run_sort(source_path, dest_path, dry_run=dry_run, log=log, on_progress=on_prog) or []
             finally:
                 running.clear()
                 app.after(0, lambda: (
@@ -1567,6 +1637,23 @@ def launch_gui() -> None:
                     sort_btn.configure(state="normal", text="Sort My Assets  🌸", fg_color=_PALETTE["accent_lav"]),
                     preview_btn.configure(state="normal", text="Preview Sort  🔍"),
                 ))
+
+            # Prompt user to clean up original files if sorting succeeded and NOT dry-run
+            if not dry_run and sorted_items:
+                def _prompt_cleanup():
+                    ans = messagebox.askyesno(
+                        "Nyahako 🐾 — Clean Up Downloads?",
+                        f"🌸 Successfully sorted {len(sorted_items)} asset(s) into your library!\n\n"
+                        f"Would you like to send the original files from your downloads folder to the Recycle Bin to free up disk space?\n\n"
+                        f"(Don't worry — they can always be restored from your Recycle Bin if needed! 🗑️)"
+                    )
+                    if ans:
+                        recycled_count = 0
+                        for src_file in sorted_items:
+                            if src_file.exists() and safe_recycle(src_file):
+                                recycled_count += 1
+                        log(f"\n🗑️  Cleaned up {recycled_count} original file(s) (safely moved to Recycle Bin).")
+                app.after(120, _prompt_cleanup)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1595,6 +1682,9 @@ def cli_main() -> None:
                         help="Destination library root folder.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview actions without writing any files.")
+    parser.add_argument("--delete-source", "--recycle-source", "--move", action="store_true",
+                        dest="delete_source",
+                        help="Safely send original source files to Recycle Bin after successful sorting.")
     parser.add_argument("--gui",     action="store_true",
                         help="Force the graphical interface (default when no args given).")
     args = parser.parse_args()
@@ -1615,12 +1705,15 @@ def cli_main() -> None:
     def safe_print(msg: str) -> None:
         print(msg.encode(enc, errors="replace").decode(enc))
 
-    run_sort(
+    sorted_items = run_sort(
         source  = args.source,
         dest    = args.dest,
         dry_run = args.dry_run,
         log     = safe_print,
     )
+    if args.delete_source and not args.dry_run and sorted_items:
+        recycled = sum(1 for f in sorted_items if f.exists() and safe_recycle(f))
+        safe_print(f"\n🗑️  Cleaned up {recycled} source file(s) (safely moved to Recycle Bin).")
 
 
 if __name__ == "__main__":

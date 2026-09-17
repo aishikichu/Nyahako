@@ -71,6 +71,12 @@ BOOTH ZIP archives packed on Japanese Windows systems often cause broken charact
 ### 🖼️ Thumbnail & Document Extraction
 Automatically extracts package `preview.png` thumbnails and README documentation directly into the sorted folder so you always have a visual reference.
 
+### 🗑️ Smart Download Cleanup (Recycle Bin Safe)
+Tired of downloaded ZIPs taking up double disk space after sorting?
+- After sorting completes, Nyahako politely asks if you want to clean up the original files from your downloads folder.
+- **100% Safe**: Files are sent to the **Windows Recycle Bin** instead of permanently deleted, so you can restore them anytime with a single click!
+- **Error-Proof**: In Preview Sort mode or if any file had an error, original files are strictly preserved.
+
 ---
 
 ## 🚀 Quick Start
@@ -102,8 +108,11 @@ Prefer using the terminal? Nyahako has a full CLI:
 # Preview actions without moving any files (Dry-Run)
 python nyahako.py --source "D:\Downloads\BOOTH" --dest "D:\UnityLibrary" --dry-run
 
-# Run the sorter
+# Run the sorter (copies files into library)
 python nyahako.py --source "D:\Downloads\BOOTH" --dest "D:\UnityLibrary"
+
+# Sort and clean up originals (moves downloads into Recycle Bin upon success)
+python nyahako.py --source "D:\Downloads\BOOTH" --dest "D:\UnityLibrary" --move
 ```
 
 ---
