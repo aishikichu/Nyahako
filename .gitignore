@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.spec
+
+# Local runtime memory & logs
+.nyahako_memory.json
+.hako_memory.json
+*.log
+
+# Environments & IDEs
+.venv/
+venv/
+.vscode/
+.idea/
+
+# Scratch & temporary testing files
+scratch/
