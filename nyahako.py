@@ -23,6 +23,7 @@ import sys
 import tarfile
 import threading
 import zipfile
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Callable
@@ -266,6 +267,76 @@ def safe_recycle(path: Path) -> bool:
             return True
         except Exception:
             return False
+
+
+
+def find_rar_tool() -> list[str] | None:
+    """Find available tool to extract/list RAR files (WinRAR or tar)."""
+    for cand in (
+        Path(r"C:\Program Files\WinRAR\Rar.exe"),
+        Path(r"C:\Program Files (x86)\WinRAR\Rar.exe"),
+        Path(r"C:\Program Files\WinRAR\WinRAR.exe"),
+    ):
+        if cand.is_file():
+            return [str(cand)]
+    for cmd in ("rar", "winrar"):
+        found = shutil.which(cmd)
+        if found:
+            return [found]
+    tar_cmd = shutil.which("tar") or r"C:\Windows\System32\tar.exe"
+    if Path(tar_cmd).is_file():
+        return [tar_cmd]
+    return None
+
+
+def find_7z_tool() -> list[str] | None:
+    """Find available tool to extract/list 7z files (7z or tar)."""
+    for cand in (
+        Path(r"C:\Program Files\7-Zip\7z.exe"),
+        Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
+    ):
+        if cand.is_file():
+            return [str(cand)]
+    for cmd in ("7z", "7za"):
+        found = shutil.which(cmd)
+        if found:
+            return [found]
+    tar_cmd = shutil.which("tar") or r"C:\Windows\System32\tar.exe"
+    if Path(tar_cmd).is_file():
+        return [tar_cmd]
+    return None
+
+
+def prune_empty_source_folders(source_root: Path, log: Callable[[str], None] | None = None) -> int:
+    """
+    Recursively removes empty directories within source_root (excluding source_root itself).
+    Ignores disposable Windows/macOS clutter like thumbs.db, desktop.ini, .DS_Store.
+    """
+    pruned = 0
+    if not source_root.is_dir():
+        return 0
+    for root, dirs, files in os.walk(str(source_root.resolve()), topdown=False):
+        p = Path(root)
+        if p.resolve() == source_root.resolve():
+            continue
+        try:
+            items = [
+                f for f in p.iterdir()
+                if f.name.lower() not in {"thumbs.db", "desktop.ini", ".ds_store", "__pycache__"}
+            ]
+            if not items:
+                for f in p.iterdir():
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                if safe_recycle(p):
+                    pruned += 1
+                    if log:
+                        log(f"  🧹 Cleaned up empty folder: {p.name}")
+        except Exception:
+            pass
+    return pruned
 
 
 def _is_subpath(p: Path, parent: Path) -> bool:
@@ -532,6 +603,42 @@ def inspect_archive_deep(item_path: Path) -> dict:
         except Exception:
             pass
 
+    elif ext == ".rar":
+        rar_tool = find_rar_tool()
+        if rar_tool:
+            try:
+                if "rar.exe" in rar_tool[0].lower() or "winrar.exe" in rar_tool[0].lower():
+                    proc = subprocess.run([rar_tool[0], "lb", str(item_path)], capture_output=True, text=True, errors="replace", timeout=15)
+                    names = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                else:
+                    proc = subprocess.run([rar_tool[0], "-tf", str(item_path)], capture_output=True, text=True, errors="replace", timeout=15)
+                    names = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                for n in names:
+                    combined_info["paths"].append(n)
+                    e = Path(n).suffix.lower()
+                    combined_info["ext_counts"][e] = combined_info["ext_counts"].get(e, 0) + 1
+                    if e in (".zip", ".rar", ".7z", ".unitypackage"):
+                        combined_info["nested_packages"].append(n)
+                        combined_info["is_wrapper_container"] = True
+            except Exception:
+                pass
+
+    elif ext == ".7z":
+        z_tool = find_7z_tool()
+        if z_tool:
+            try:
+                proc = subprocess.run([z_tool[0], "-tf", str(item_path)], capture_output=True, text=True, errors="replace", timeout=15)
+                names = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                for n in names:
+                    combined_info["paths"].append(n)
+                    e = Path(n).suffix.lower()
+                    combined_info["ext_counts"][e] = combined_info["ext_counts"].get(e, 0) + 1
+                    if e in (".zip", ".rar", ".7z", ".unitypackage"):
+                        combined_info["nested_packages"].append(n)
+                        combined_info["is_wrapper_container"] = True
+            except Exception:
+                pass
+
     return combined_info
 
 
@@ -757,6 +864,8 @@ def extract_product_and_variant(name: str, parent_folder_name: str = "", dest_pa
 
     # Strip version suffix
     clean = re.sub(r"[_\-\s]+(v|ver)?\d+(\.\d+)*$", "", stem, flags=re.IGNORECASE).strip(" _-")
+    # Strip bundle/fullset suffix
+    clean = re.sub(r"[_\-\s]+(fullset|full_set|allset|all_set|pack)$", "", clean, flags=re.IGNORECASE).strip(" _-")
 
     # 1. Explicit grammar pattern: "For_<Avatar>" or "対応_<Avatar>" or "用_<Avatar>"
     explicit_pat = r"^(.*?)[_\-\s]+(?:for|対応|向け|用)[_\-\s]+([A-Za-z0-9_\-]+?)(?:[_\-\s]+(?:v|ver)?\d+.*)?$"
@@ -801,23 +910,26 @@ def extract_product_and_variant(name: str, parent_folder_name: str = "", dest_pa
 # ASSET DISCOVERY & DEDUPLICATION
 # ──────────────────────────────────────────────────────────────────────────────
 
-def find_assets_to_sort(source: Path, dest: Path) -> list[Path]:
+def find_assets_to_sort(source: Path, dest: Path) -> tuple[list[Path], dict[Path, set[Path]]]:
     """
-    Find all .zip, .unitypackage, and .unity files in source.
-    Performs intelligent sibling deduplication:
-    - If 'Foo.zip' and 'Foo.unitypackage' sit in the same folder, prioritize Foo.zip.
-    - If 'Foo.zip' exists alongside an already-extracted subfolder 'Foo/', skip the redundant outer container zip.
+    Find all .zip, .unitypackage, .unity, .rar, and .7z files in source.
+    Returns (primary_items, associated_map) where associated_map tracks:
+    - Sibling duplicate archives/packages (e.g. Item.unitypackage when Item.zip is sorted).
+    - Extracted sibling folders (e.g. Item/ folder when Item.zip is sorted).
+    - Loose sibling docs/images belonging to the asset.
     """
     dest_resolved = dest.resolve()
     found: list[Path] = []
-    target_exts = {".zip", ".unitypackage", ".unity"}
+    associated_map: dict[Path, set[Path]] = {}
+    target_exts = {".zip", ".unitypackage", ".unity", ".rar", ".7z"}
 
     for root, dirs, files in os.walk(source):
+        # Do not recurse into destination library or system directories
         dirs[:] = [
             d for d in dirs
             if not d.startswith(".")
             and d not in ("__pycache__", "node_modules", ".git")
-            and not _is_subpath(Path(root) / d, dest_resolved)
+            and not _is_subpath((Path(root) / d).resolve(), dest_resolved)
         ]
 
         files_by_stem: dict[str, list[str]] = {}
@@ -829,29 +941,45 @@ def find_assets_to_sort(source: Path, dest: Path) -> list[Path]:
                 norm_stem = re.sub(r"[_\-\s]+", "", os.path.splitext(f)[0].lower())
                 files_by_stem.setdefault(norm_stem, []).append(f)
 
+        skipped_subdirs: set[str] = set()
+
         for norm_stem, flist in files_by_stem.items():
-            has_zip = any(f.lower().endswith(".zip") for f in flist)
-            has_pkg = any(f.lower().endswith(".unitypackage") for f in flist)
+            # Preference order: .zip > .rar > .7z > .unitypackage > .unity
+            ext_order = {".zip": 1, ".rar": 2, ".7z": 3, ".unitypackage": 4, ".unity": 5}
+            sorted_flist = sorted(flist, key=lambda f: ext_order.get(os.path.splitext(f)[1].lower(), 99))
+            primary = Path(root) / sorted_flist[0]
+            duplicates = {Path(root) / f for f in sorted_flist[1:]}
 
-            for f in flist:
-                fpath = Path(root) / f
-                if _is_subpath(fpath, dest_resolved):
-                    continue
+            assoc_set = set(duplicates)
 
-                if has_zip and has_pkg and f.lower().endswith(".unitypackage"):
-                    continue
+            # Check for extracted sibling folder matching stem
+            cand_folder = primary.parent / primary.stem
+            if cand_folder.is_dir() and cand_folder != primary:
+                assoc_set.add(cand_folder)
+                skipped_subdirs.add(primary.stem)
 
-                if f.lower().endswith(".zip"):
-                    stem = fpath.stem
-                    cand_folder = fpath.parent / stem
-                    if cand_folder.is_dir():
-                        sub_assets = [p for p in cand_folder.iterdir() if p.suffix.lower() in target_exts]
-                        if sub_assets:
-                            continue
+            # Check normalized folder matches
+            for d in list(dirs):
+                cand_d = Path(root) / d
+                cand_norm = re.sub(r"[_\-\s]+", "", d.lower())
+                if cand_norm == norm_stem and cand_d != primary:
+                    assoc_set.add(cand_d)
+                    skipped_subdirs.add(d)
 
-                found.append(fpath)
+            # Sibling loose docs / thumbnails with matching stem
+            for f in files:
+                f_ext = os.path.splitext(f)[1].lower()
+                f_stem_norm = re.sub(r"[_\-\s]+", "", os.path.splitext(f)[0].lower())
+                if f_ext in {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt", ".md"} and f_stem_norm == norm_stem:
+                    assoc_set.add(Path(root) / f)
 
-    return sorted(found, key=lambda p: (p.name.lower(), str(p)))
+            found.append(primary)
+            associated_map.setdefault(primary, set()).update(assoc_set)
+
+        # Do not recurse into folders that are extracted siblings of archives in this directory
+        dirs[:] = [d for d in dirs if d not in skipped_subdirs]
+
+    return sorted(found, key=lambda p: (p.name.lower(), str(p))), associated_map
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1049,20 +1177,80 @@ def process_entry(
     if ext == ".zip":
         with zipfile.ZipFile(entry_path, "r") as zf:
             pkg_members = [n for n in zf.namelist() if n.lower().endswith(".unitypackage") and not n.startswith("__MACOSX")]
-            sub_zips = [n for n in zf.namelist() if n.lower().endswith(".zip") and not n.startswith("__MACOSX")]
+            sub_zips = [n for n in zf.namelist() if n.lower().endswith((".zip", ".rar", ".7z")) and not n.startswith("__MACOSX")]
 
-            if pkg_members and len(pkg_members) == 1 and not sub_zips:
-                # Direct single package inside zip: unwrap package cleanly
-                log(f"  {_E['extract']} Unwrapping nested package: {pkg_members[0]}")
-                pkg_dest = dest_dir / Path(pkg_members[0]).name
-                if not pkg_dest.exists():
-                    stream_extract(zf, pkg_members[0], pkg_dest)
-                for n in zf.namelist():
-                    if Path(n).suffix.lower() in (".txt", ".md", ".pdf") and not (dest_dir / Path(n).name).exists():
-                        stream_extract(zf, n, dest_dir / Path(n).name)
+            if sub_zips and len(sub_zips) > 1:
+                # Multi-archive container (e.g. bundle with 15 per-avatar zips)
+                log(f"  {_E['extract']} Extracting multi-asset bundle ({len(sub_zips)} sub-archives)…")
+                tmp_dir = Path(tempfile.mkdtemp(prefix="nyahako_bundle_"))
+                try:
+                    for sz in sub_zips:
+                        stream_extract(zf, sz, tmp_dir / Path(sz).name)
+                    # Sort each extracted variant into library
+                    for sz_file in sorted(tmp_dir.iterdir()):
+                        if sz_file.suffix.lower() in {".zip", ".rar", ".7z", ".unitypackage"}:
+                            sz_prod, sz_var, sz_av = extract_product_and_variant(sz_file.stem, entry_path.stem, dest_path=dest_dir.parent)
+                            process_entry(sz_file, dest_dir.parent if sz_var else dest_dir, dry_run=False, log=log,
+                                          cat_override=category, source_root=source_root)
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
             else:
+                # Standard archive: extract all files cleanly (packages, textures, PSDs, CLIP, Readmes)
                 log(f"  {_E['extract']} Extracting archive contents…")
                 extract_all_streamed(zf, dest_dir, log)
+
+    elif ext in (".rar", ".7z"):
+        log(f"  {_E['extract']} Extracting {ext} archive contents…")
+        rar_tool = find_rar_tool() if ext == ".rar" else find_7z_tool()
+        if not rar_tool:
+            log(f"  {_E['warn']} No archiver found for {ext} (install WinRAR or 7-Zip)")
+        else:
+            names = []
+            try:
+                if ext == ".rar" and ("rar.exe" in rar_tool[0].lower() or "winrar.exe" in rar_tool[0].lower()):
+                    proc = subprocess.run([rar_tool[0], "lb", str(entry_path)], capture_output=True, text=True, errors="replace", timeout=15)
+                    names = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+                else:
+                    proc = subprocess.run([rar_tool[0], "-tf", str(entry_path)], capture_output=True, text=True, errors="replace", timeout=15)
+                    names = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+            except Exception:
+                names = []
+
+            sub_archives = [n for n in names if Path(n).suffix.lower() in (".zip", ".rar", ".7z", ".unitypackage") and not Path(n).name.startswith(".")]
+            if len(sub_archives) > 1:
+                log(f"  {_E['extract']} Extracting multi-asset bundle ({len(sub_archives)} sub-archives)…")
+                tmp_dir = Path(tempfile.mkdtemp(prefix="nyahako_bundle_"))
+                try:
+                    if ext == ".rar" and ("rar.exe" in rar_tool[0].lower() or "winrar.exe" in rar_tool[0].lower()):
+                        subprocess.run([rar_tool[0], "x", "-y", "-idq", str(entry_path), str(tmp_dir) + "\\"], timeout=180)
+                    else:
+                        subprocess.run([rar_tool[0], "-xf", str(entry_path), "-C", str(tmp_dir)], timeout=180)
+                    for root_t, _, files_t in os.walk(tmp_dir):
+                        for ft in files_t:
+                            fpt = Path(root_t) / ft
+                            if fpt.suffix.lower() in {".zip", ".rar", ".7z", ".unitypackage"}:
+                                sz_prod, sz_var, sz_av = extract_product_and_variant(fpt.stem, entry_path.stem, dest_path=dest_dir.parent)
+                                process_entry(fpt, dest_dir.parent if sz_var else dest_dir, dry_run=False, log=log,
+                                              cat_override=category, source_root=source_root)
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+            else:
+                if ext == ".rar" and ("rar.exe" in rar_tool[0].lower() or "winrar.exe" in rar_tool[0].lower()):
+                    subprocess.run([rar_tool[0], "x", "-y", "-idq", str(entry_path), str(dest_dir) + "\\"], timeout=180)
+                else:
+                    subprocess.run([rar_tool[0], "-xf", str(entry_path), "-C", str(dest_dir)], timeout=180)
+                # Flatten single common top folder if present
+                sub_entries = [p for p in dest_dir.iterdir() if p.name != "README.md" and not p.name.startswith(".")]
+                if len(sub_entries) == 1 and sub_entries[0].is_dir():
+                    single_sub = sub_entries[0]
+                    for child in list(single_sub.iterdir()):
+                        target = dest_dir / child.name
+                        if not target.exists():
+                            shutil.move(str(child), str(target))
+                    try:
+                        single_sub.rmdir()
+                    except Exception:
+                        pass
 
     elif ext == ".unitypackage":
         target_pkg = dest_dir / entry_path.name
@@ -1129,19 +1317,25 @@ def run_sort(
     dry_run: bool,
     log: Callable[[str], None],
     on_progress: Callable[[float], None] | None = None,
-) -> list[Path]:
-    items = find_assets_to_sort(source, dest)
+) -> tuple[list[Path], dict[Path, set[Path]]]:
+    items, associated_map = find_assets_to_sort(source, dest)
     if not items:
-        log(f"{_E['warn']} No .zip, .unitypackage, or .unity files found in {source}")
-        return []
+        log(f"{_E['warn']} No .zip, .unitypackage, .rar, .7z, or .unity files found in {source}")
+        return [], {}
 
     n_zip = sum(1 for p in items if p.suffix.lower() == ".zip")
+    n_rar = sum(1 for p in items if p.suffix.lower() == ".rar")
+    n_7z = sum(1 for p in items if p.suffix.lower() == ".7z")
     n_pkg = sum(1 for p in items if p.suffix.lower() == ".unitypackage")
     n_unity = sum(1 for p in items if p.suffix.lower() == ".unity")
 
     summary_parts = []
     if n_zip:
         summary_parts.append(f"{n_zip} ZIP(s)")
+    if n_rar:
+        summary_parts.append(f"{n_rar} RAR(s)")
+    if n_7z:
+        summary_parts.append(f"{n_7z} 7Z(s)")
     if n_pkg:
         summary_parts.append(f"{n_pkg} .unitypackage file(s)")
     if n_unity:
@@ -1214,7 +1408,7 @@ def run_sort(
     else:
         log(f"\n{_E['done']} All done! Check your library at: {dest}")
 
-    return successful_items
+    return successful_items, associated_map
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1610,12 +1804,31 @@ def launch_gui() -> None:
                     ans = messagebox.askyesno(
                         "Nyahako 🐾 — Clean Up Original?",
                         f"🌸 Successfully sorted '{item_path.name}'!\n\n"
-                        f"Would you like to send the original file to the Recycle Bin to save disk space?\n\n"
-                        f"(You can restore it anytime from your Recycle Bin! 🗑️)"
+                        f"Would you like to send the original file and associated downloads to the Recycle Bin to save disk space?\n\n"
+                        f"(You can restore them anytime from your Recycle Bin! 🗑️)"
                     )
                     if ans:
+                        recycled_count = 0
+                        recycled_paths: set[Path] = set()
                         if safe_recycle(item_path):
-                            log(f"  🗑️  Moved original '{item_path.name}' to Recycle Bin.")
+                            recycled_count += 1
+                            recycled_paths.add(item_path)
+                        # Check associated siblings in same directory
+                        norm_stem = re.sub(r"[_\-\s]+", "", item_path.stem.lower())
+                        try:
+                            for f in item_path.parent.iterdir():
+                                if f not in recycled_paths:
+                                    f_stem_norm = re.sub(r"[_\-\s]+", "", f.stem.lower())
+                                    if f_stem_norm == norm_stem:
+                                        if safe_recycle(f):
+                                            recycled_count += 1
+                                            recycled_paths.add(f)
+                        except Exception:
+                            pass
+                        pruned = prune_empty_source_folders(item_path.parent, log=log)
+                        log(f"  🗑️  Cleaned up {recycled_count} file(s)/folder(s) (safely moved to Recycle Bin).")
+                        if pruned:
+                            log(f"  🧹 Pruned {pruned} empty folder(s).")
                 app.after(120, _prompt_single_cleanup)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1668,8 +1881,11 @@ def launch_gui() -> None:
                 app.after(0, lambda: progress_bar.set(frac))
 
             sorted_items = []
+            assoc_map: dict[Path, set[Path]] = {}
             try:
-                sorted_items = run_sort(source_path, dest_path, dry_run=dry_run, log=log, on_progress=on_prog) or []
+                res_sort = run_sort(source_path, dest_path, dry_run=dry_run, log=log, on_progress=on_prog)
+                if res_sort:
+                    sorted_items, assoc_map = res_sort
             finally:
                 is_animating_sort[0] = False
                 running.clear()
@@ -1685,15 +1901,29 @@ def launch_gui() -> None:
                     ans = messagebox.askyesno(
                         "Nyahako 🐾 — Clean Up Downloads?",
                         f"🌸 Successfully sorted {len(sorted_items)} asset(s) into your library!\n\n"
-                        f"Would you like to send the original files from your downloads folder to the Recycle Bin to free up disk space?\n\n"
+                        f"Would you like to send the original files and folders from your downloads folder to the Recycle Bin to free up disk space?\n\n"
                         f"(Don't worry — they can always be restored from your Recycle Bin if needed! 🗑️)"
                     )
                     if ans:
                         recycled_count = 0
+                        recycled_paths: set[Path] = set()
+
                         for src_file in sorted_items:
-                            if src_file.exists() and safe_recycle(src_file):
-                                recycled_count += 1
-                        log(f"\n🗑️  Cleaned up {recycled_count} original file(s) (safely moved to Recycle Bin).")
+                            if src_file.exists() and src_file not in recycled_paths:
+                                if safe_recycle(src_file):
+                                    recycled_count += 1
+                                    recycled_paths.add(src_file)
+
+                            for assoc in assoc_map.get(src_file, set()):
+                                if assoc.exists() and assoc not in recycled_paths:
+                                    if safe_recycle(assoc):
+                                        recycled_count += 1
+                                        recycled_paths.add(assoc)
+
+                        pruned = prune_empty_source_folders(source_path, log=log)
+                        log(f"\n🗑️  Cleaned up {recycled_count} original file(s)/folder(s) (safely moved to Recycle Bin).")
+                        if pruned:
+                            log(f"🧹  Pruned {pruned} empty source folder(s).")
                 app.after(120, _prompt_cleanup)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -1746,15 +1976,29 @@ def cli_main() -> None:
     def safe_print(msg: str) -> None:
         print(msg.encode(enc, errors="replace").decode(enc))
 
-    sorted_items = run_sort(
+    sorted_items, assoc_map = run_sort(
         source  = args.source,
         dest    = args.dest,
         dry_run = args.dry_run,
         log     = safe_print,
     )
     if args.delete_source and not args.dry_run and sorted_items:
-        recycled = sum(1 for f in sorted_items if f.exists() and safe_recycle(f))
-        safe_print(f"\n🗑️  Cleaned up {recycled} source file(s) (safely moved to Recycle Bin).")
+        recycled_count = 0
+        recycled_paths: set[Path] = set()
+        for src_file in sorted_items:
+            if src_file.exists() and src_file not in recycled_paths:
+                if safe_recycle(src_file):
+                    recycled_count += 1
+                    recycled_paths.add(src_file)
+            for assoc in assoc_map.get(src_file, set()):
+                if assoc.exists() and assoc not in recycled_paths:
+                    if safe_recycle(assoc):
+                        recycled_count += 1
+                        recycled_paths.add(assoc)
+        pruned = prune_empty_source_folders(args.source, log=safe_print)
+        safe_print(f"\n🗑️  Cleaned up {recycled_count} source file(s)/folder(s) (safely moved to Recycle Bin).")
+        if pruned:
+            safe_print(f"🧹  Pruned {pruned} empty source folder(s).")
 
 
 if __name__ == "__main__":
