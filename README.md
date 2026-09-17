@@ -11,7 +11,12 @@
 
 <br/>
 
-<img src="assets/mascot.png" width="160" alt="Nyahako Mascot" />
+```text
+       /\_/\      . *  [Outfit.zip]
+      ( =^.^=)   *  .       v
+     / >[BOX]\  [================]
+    (__)___(__) [📦 Nyahako Library] 🐾
+```
 
 <p>
 <b>Nya~hello!</b> Tired of your BOOTH downloads folder becoming a messy, chaotic jungle of ZIPs and <code>.unitypackage</code> files?

@@ -1239,6 +1239,46 @@ _PALETTE = {
 }
 
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CUTE ASCII CAT ART & ANIMATION FRAMES (100% IN-CODE, 0% CPU)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ASCII_IDLE_FRAMES = [
+r"""       /\_/\  
+      ( o.o )   [ 📦 Nyahako ]
+     / >[BOX]\  Ready to organize your assets~
+    (__)___(__) Drop BOOTH files to begin! 🐾""",
+
+r"""       /\_/\  
+      ( ^.^ )   [ 🌸 Nyahako ]
+     / >[BOX]\  Ready to organize your assets~
+    (__)___(__) Drop BOOTH files to begin! 🐾"""
+]
+
+ASCII_SORTING_FRAMES = [
+r"""       /\_/\      . *  [Outfit.zip]
+      ( o.o )    *  .       v
+     / >[BOX]\  [================]
+    (__)___(__) [📦 Clothes     ] 🐾""",
+
+r"""       /\_/\      *  . [HairStyle.zip]
+      ( ^.^ )    .  *       v
+     / >[BOX]\  [================]
+    (__)___(__) [🎀 Hair        ] ✨""",
+
+r"""       /\_/\      .  *  [Particle.zip]
+      ( >.< )    *  .       v
+     / >[BOX]\  [================]
+    (__)___(__) [✨ Effects     ] 🌸""",
+
+r"""       /\_/\      *  .  [HaloProp.zip]
+      ( =^.^=)   .  *       v
+     / >[BOX]\  [================]
+    (__)___(__) [💎 Accessories ] 💖"""
+]
+
+
 def launch_gui() -> None:
     try:
         import customtkinter as ctk
@@ -1265,13 +1305,6 @@ def launch_gui() -> None:
             app.iconbitmap(str(_ico_path))
         except Exception:
             pass
-    elif (_ASSETS_DIR / "mascot.png").exists():
-        try:
-            from PIL import ImageTk, Image
-            _pimg = ImageTk.PhotoImage(Image.open(_ASSETS_DIR / "mascot.png").resize((32, 32)))
-            app.wm_iconphoto(False, _pimg)
-        except Exception:
-            pass
 
     mem = load_nyahako_memory()
     saved_src = mem.get("last_source", "") if mem.get("last_source") and Path(mem["last_source"]).is_dir() else ""
@@ -1280,6 +1313,7 @@ def launch_gui() -> None:
     source_var = ctk.StringVar(value=saved_src)
     dest_var   = ctk.StringVar(value=saved_dst)
     running    = threading.Event()
+    is_animating_sort = [False]
 
     font_title   = ctk.CTkFont(family="Segoe UI", size=20, weight="bold")
     font_sub     = ctk.CTkFont(family="Segoe UI", size=11)
@@ -1287,45 +1321,48 @@ def launch_gui() -> None:
     font_path    = ctk.CTkFont(family="Segoe UI", size=10)
     font_console = ctk.CTkFont(family="Consolas", size=11)
 
-    # ── Header ────────────────────────────────────────────────────────────────
+    # ── Header with Animated Cute ASCII Cat Art ──────────────────────────────
     header_frame = ctk.CTkFrame(app, fg_color=_PALETTE["card"],
                                 corner_radius=16, border_width=1,
                                 border_color=_PALETTE["border"])
     header_frame.pack(fill="x", padx=20, pady=(16, 0))
 
-    _logo_img = None
-    for _img_name in ("mascot.png", "logo.png", "icon.png"):
-        _img_path = _ASSETS_DIR / _img_name
-        if _img_path.exists():
-            try:
-                from PIL import Image
-                _pil = Image.open(_img_path).convert("RGBA")
-                _target_h = 92
-                _w, _h = _pil.size
-                _target_w = int(_w * _target_h / _h)
-                _pil = _pil.resize((_target_w, _target_h), Image.LANCZOS)
-                _logo_img = ctk.CTkImage(light_image=_pil, dark_image=_pil,
-                                         size=(_target_w, _target_h))
-            except Exception:
-                pass
-            break
-
-    if _logo_img:
-        ctk.CTkLabel(header_frame, text="", image=_logo_img).pack(pady=(12, 0))
-
-    ctk.CTkLabel(
+    ascii_cat_lbl = ctk.CTkLabel(
         header_frame,
-        text="Nyahako 🐾" if _logo_img else "📦  Nyahako 🐾",
-        font=font_title,
+        text=ASCII_IDLE_FRAMES[0],
+        font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
         text_color=_PALETTE["accent_lav"],
-    ).pack(pady=(4 if _logo_img else 12, 0))
+        justify="left",
+    )
+    ascii_cat_lbl.pack(pady=(12, 4))
 
     ctk.CTkLabel(
         header_frame,
-        text="smart vrc & unity asset sorter for BOOTH downloads 🌸",
-        font=font_sub,
-        text_color=_PALETTE["muted"],
-    ).pack(pady=(2, 12))
+        text="Nyahako 🐾 — smart vrc & unity asset sorter 🌸",
+        font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+        text_color=_PALETTE["accent_pink"],
+    ).pack(pady=(0, 10))
+
+    anim_frame_idx = [0]
+
+    def _tick_cat_animation():
+        if not app.winfo_exists():
+            return
+        anim_frame_idx[0] += 1
+        if is_animating_sort[0]:
+            frames = ASCII_SORTING_FRAMES
+            text_color = _PALETTE["accent_pink"]
+            delay = 220  # Lively 4.5 FPS sorting animation
+        else:
+            frames = ASCII_IDLE_FRAMES
+            text_color = _PALETTE["accent_lav"]
+            delay = 800  # Gentle breathing / blinking loop
+
+        frame_text = frames[anim_frame_idx[0] % len(frames)]
+        ascii_cat_lbl.configure(text=frame_text, text_color=text_color)
+        app.after(delay, _tick_cat_animation)
+
+    app.after(400, _tick_cat_animation)
 
     # ── Folder selectors ──────────────────────────────────────────────────────
     folder_frame = ctk.CTkFrame(app, fg_color=_PALETTE["card"],
@@ -1550,6 +1587,7 @@ def launch_gui() -> None:
 
         def _worker():
             running.set()
+            is_animating_sort[0] = True
             app.after(0, lambda: sort_single_btn.configure(
                 state="disabled", text="Sorting… ⏳", fg_color=_PALETTE["muted"]))
             succeeded = False
@@ -1562,6 +1600,7 @@ def launch_gui() -> None:
             except Exception as exc:
                 log(f"  {_E['error']} Unexpected error: {exc}")
             finally:
+                is_animating_sort[0] = False
                 running.clear()
                 app.after(0, lambda: sort_single_btn.configure(
                     state="normal", text="Sort This File  ✨", fg_color=_PALETTE["accent_mint"]))
@@ -1615,6 +1654,7 @@ def launch_gui() -> None:
 
         def worker():
             running.set()
+            is_animating_sort[0] = True
             active_btn = preview_btn if dry_run else sort_btn
             app.after(0, lambda: (
                 sort_btn.configure(state="disabled"),
@@ -1631,6 +1671,7 @@ def launch_gui() -> None:
             try:
                 sorted_items = run_sort(source_path, dest_path, dry_run=dry_run, log=log, on_progress=on_prog) or []
             finally:
+                is_animating_sort[0] = False
                 running.clear()
                 app.after(0, lambda: (
                     progress_bar.set(1.0),
