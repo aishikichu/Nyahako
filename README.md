@@ -80,13 +80,28 @@ Automatically extracts package `preview.png` thumbnails and README documentation
 Tired of downloaded ZIPs taking up double disk space after sorting?
 - After sorting completes, Nyahako politely asks if you want to clean up the original files from your downloads folder.
 - **100% Safe**: Files are sent to the **Windows Recycle Bin** instead of permanently deleted, so you can restore them anytime with a single click!
-- **Error-Proof**: In Preview Sort mode or if any file had an error, original files are strictly preserved.
+### 🖱️ Native Windows Drag & Drop (Zero Lag)
+Don't want to browse through folder dialogs? Simply drag & drop:
+- **Drop any Folder**: Instantly sets your BOOTH Downloads folder.
+- **Drop any Archive (`.zip`, `.rar`, `.7z`, `.unitypackage`)**: Instantly loads into the **Single Asset Sorter**, automatically detecting the product name, category, and avatar compatibility so you can sort it with 1 click!
+
+### ⚙️ VRChat & Unity Superpowers Tab
+Customize your sorting workflow with dedicated VRChat features:
+- **💖 My Main Avatars**: Tag your favorite avatars (e.g. `Mayo, Shinano, Manuka, Kikyo`). Matching outfits and hairs get heart badges in logs and priority notes in READMEs!
+- **🏷️ Framework & Shader Detection**: Automatically detects and documents prerequisites like **lilToon**, **Poiyomi**, **Modular Avatar**, and **VRCFury**.
+- **⚡ Fast Move / Storage Saver**: Move files instead of copying to eliminate disk space waste and finish in 0.01 seconds.
+- **🎮 Active Unity Project Target**: Set your active Unity project folder for 1-click access.
+- **🎨 Pastel Themes**: Choose between *Lavender Night 🌙*, *Sakura Mochi 🌸*, *Matcha Mint 🍵*, and *Cyber Pastel 🩵*.
 
 ---
 
 ## 🚀 Quick Start
 
-### Option A: Run from Source (Python)
+### Option A: Download Standalone EXE (No Python Needed!)
+Grab the latest pre-compiled **`Nyahako.exe`** from the [GitHub Releases](https://github.com/aishikichu/Nyahako/releases) page! Simply download and run—no installation needed.
+
+### Option B: Run from Source (Python)
+
 
 1. **Clone the repository:**
    ```bash
