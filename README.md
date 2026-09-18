@@ -24,6 +24,12 @@
 <b>Nyahako</b> is a smart, super-fast desktop utility that automatically organizes your models, outfits, hairstyles, props, textures, VFX, and shaders into a clean, structured Unity library!
 </p>
 
+<p align="center">
+  <img src="assets/image1.png" width="375" alt="Nyahako Sorter Tab" />
+  &nbsp;&nbsp;
+  <img src="assets/image2.png" width="375" alt="Nyahako Superpowers & Settings Tab" />
+</p>
+
 [✨ Features](#-features) •
 [🚀 Quick Start](#-quick-start) •
 [📁 Library Taxonomy](#-library-taxonomy) •
@@ -91,7 +97,7 @@ Customize your sorting workflow with dedicated VRChat features:
 - **🏷️ Framework & Shader Detection**: Automatically detects and documents prerequisites like **lilToon**, **Poiyomi**, **Modular Avatar**, and **VRCFury**.
 - **⚡ Fast Move / Storage Saver**: Move files instead of copying to eliminate disk space waste and finish in 0.01 seconds.
 - **🎮 Active Unity Project Target**: Set your active Unity project folder for 1-click access.
-- **🎨 Pastel Themes**: Choose between *Lavender Night 🌙*, *Sakura Mochi 🌸*, *Matcha Mint 🍵*, and *Cyber Pastel 🩵*.
+- **🎨 Instant Pastel Themes**: Switch between *Lavender Night 🌙*, *Sakura Mochi 🌸*, *Matcha Mint 🍵*, and *Cyber Pastel 🩵*—colors update live across the entire app with zero restart needed!
 
 ---
 
