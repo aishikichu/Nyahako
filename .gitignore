@@ -21,3 +21,6 @@ venv/
 
 # Scratch & temporary testing files
 scratch/
+
+# GitHub workflows (manage via GitHub web or token with workflow scope)
+.github/
