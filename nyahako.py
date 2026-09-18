@@ -1569,6 +1569,8 @@ def setup_native_dnd(window, on_drop_callback) -> bool:
     """
     Hooks native Windows Shell WM_DROPFILES into the Tkinter window using ctypes.
     Zero external pip dependencies, 0% CPU overhead, 100% smooth.
+    Subclasses both the child HWND and the top-level window frame so drops from
+    Windows File Explorer are reliably intercepted anywhere on the window.
     """
     try:
         import ctypes
@@ -1576,6 +1578,7 @@ def setup_native_dnd(window, on_drop_callback) -> bool:
 
         WM_DROPFILES = 0x0233
         GWLP_WNDPROC = -4
+        GA_ROOT = 2
 
         WNDPROC = ctypes.WINFUNCTYPE(
             ctypes.c_longlong,
@@ -1593,30 +1596,45 @@ def setup_native_dnd(window, on_drop_callback) -> bool:
         SetWindowLongPtr.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
         SetWindowLongPtr.restype = ctypes.c_void_p
 
+        GetAncestor = ctypes.windll.user32.GetAncestor
+        GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        GetAncestor.restype = wintypes.HWND
+
         window.update_idletasks()
-        hwnd = window.winfo_id()
+        hwnd_child = window.winfo_id()
+        hwnd_top = GetAncestor(hwnd_child, GA_ROOT)
+        hwnds = [h for h in dict.fromkeys([hwnd_child, hwnd_top]) if h]
 
-        old_proc = [None]
+        old_procs = {}
+        callbacks = []
 
-        def py_wndproc(h, msg, wp, lp):
-            if msg == WM_DROPFILES:
-                hdrop = wp
-                count = ctypes.windll.shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
-                files = []
-                for i in range(count):
-                    buf = ctypes.create_unicode_buffer(512)
-                    ctypes.windll.shell32.DragQueryFileW(hdrop, i, buf, 512)
-                    files.append(buf.value)
-                ctypes.windll.shell32.DragFinish(hdrop)
-                if files:
-                    window.after(0, lambda: on_drop_callback(files))
-                return 0
-            return CallWindowProc(old_proc[0], h, msg, wp, lp)
+        def handle_drop(hdrop):
+            count = ctypes.windll.shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
+            files = []
+            for i in range(count):
+                buf = ctypes.create_unicode_buffer(512)
+                ctypes.windll.shell32.DragQueryFileW(hdrop, i, buf, 512)
+                files.append(buf.value)
+            ctypes.windll.shell32.DragFinish(hdrop)
+            if files:
+                window.after(0, lambda: on_drop_callback(files))
 
-        c_wndproc = WNDPROC(py_wndproc)
-        window._native_wndproc_ref = c_wndproc
-        old_proc[0] = SetWindowLongPtr(hwnd, GWLP_WNDPROC, ctypes.cast(c_wndproc, ctypes.c_void_p))
-        ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
+        for h in hwnds:
+            def make_wndproc(target_h):
+                def py_wndproc(hwnd_param, msg, wp, lp):
+                    if msg == WM_DROPFILES:
+                        handle_drop(wp)
+                        return 0
+                    return CallWindowProc(old_procs.get(target_h, 0), hwnd_param, msg, wp, lp)
+                return WNDPROC(py_wndproc)
+
+            c_wndproc = make_wndproc(h)
+            callbacks.append(c_wndproc)
+            old_p = SetWindowLongPtr(h, GWLP_WNDPROC, ctypes.cast(c_wndproc, ctypes.c_void_p))
+            old_procs[h] = old_p
+            ctypes.windll.shell32.DragAcceptFiles(h, True)
+
+        window._native_wndproc_refs = (callbacks, old_procs)
         return True
     except Exception:
         return False
