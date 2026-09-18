@@ -1702,12 +1702,13 @@ def launch_gui() -> None:
     )
     ascii_cat_lbl.pack(pady=(10, 2))
 
-    ctk.CTkLabel(
+    header_sub_lbl = ctk.CTkLabel(
         header_frame,
         text="Nyahako 🐾 — smart vrc & unity asset sorter 🌸",
         font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
         text_color=_PALETTE["accent_pink"],
-    ).pack(pady=(0, 8))
+    )
+    header_sub_lbl.pack(pady=(0, 8))
 
     anim_frame_idx = [0]
 
@@ -1744,10 +1745,20 @@ def launch_gui() -> None:
     tab_settings = tabview.add("  ⚙️ Superpowers & Settings  ")
 
     # ── TAB 1: 🌸 SORTER ──────────────────────────────────────────────────────
+    dnd_hint_lbl = ctk.CTkLabel(
+        tab_sort,
+        text="✨ Drag & drop any folder or archive (.zip, .unitypackage) right here!",
+        font=ctk.CTkFont(family="Segoe UI", size=10),
+        text_color=_PALETTE["accent_pink"],
+    )
+    dnd_hint_lbl.pack(pady=(4, 2))
+
     folder_frame = ctk.CTkFrame(tab_sort, fg_color="transparent")
     folder_frame.pack(fill="x", pady=(2, 0))
 
-    def make_folder_row(parent, label_text: str, var: ctk.StringVar, accent: str):
+    folder_widgets = []
+
+    def make_folder_row(parent, label_text: str, var: ctk.StringVar, accent_key: str):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=4, pady=(6, 0))
 
@@ -1764,19 +1775,22 @@ def launch_gui() -> None:
                     log(f"  {_E['info']} Library loaded: {len(avs)} recognized avatar models in memory.")
                 save_nyahako_memory(m, Path(dest_var.get()) if dest_var.get() else None)
 
-        ctk.CTkButton(
-            row, text=label_text, font=font_btn, fg_color=accent,
+        btn = ctk.CTkButton(
+            row, text=label_text, font=font_btn, fg_color=_PALETTE[accent_key],
             hover_color=_PALETTE["btn_hover"], text_color="#1a1a2e",
             corner_radius=10, height=34, command=pick,
-        ).pack(fill="x")
+        )
+        btn.pack(fill="x")
 
-        ctk.CTkLabel(
+        lbl = ctk.CTkLabel(
             parent, textvariable=var, font=font_path,
             text_color=_PALETTE["muted"], wraplength=480, justify="left",
-        ).pack(anchor="w", padx=8, pady=(2, 4))
+        )
+        lbl.pack(anchor="w", padx=8, pady=(2, 4))
+        folder_widgets.append((btn, accent_key, lbl))
 
-    make_folder_row(folder_frame, "📁  Select BOOTH Downloads Folder", source_var, _PALETTE["accent_pink"])
-    make_folder_row(folder_frame, "📚  Select Unity Library Folder", dest_var, _PALETTE["accent_blue"])
+    make_folder_row(folder_frame, "📁  Select BOOTH Downloads Folder", source_var, "accent_pink")
+    make_folder_row(folder_frame, "📚  Select Unity Library Folder", dest_var, "accent_blue")
 
     # Progress bar
     progress_bar = ctk.CTkProgressBar(
@@ -1857,12 +1871,13 @@ def launch_gui() -> None:
     override_frame = ctk.CTkFrame(tab_sort, fg_color=_PALETTE["border"], corner_radius=12)
     override_frame.pack(fill="x", padx=4, pady=(4, 0))
 
-    ctk.CTkLabel(
+    override_title_lbl = ctk.CTkLabel(
         override_frame,
         text="🎯 Single File Quick Sorter & Drag Target",
         font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
         text_color=_PALETTE["accent_pink"],
-    ).pack(anchor="w", padx=10, pady=(6, 2))
+    )
+    override_title_lbl.pack(anchor="w", padx=10, pady=(6, 2))
 
     single_row = ctk.CTkFrame(override_frame, fg_color="transparent")
     single_row.pack(fill="x", padx=10, pady=(2, 4))
@@ -2019,17 +2034,19 @@ def launch_gui() -> None:
     av_card = ctk.CTkFrame(tab_settings, fg_color="transparent")
     av_card.pack(fill="x", padx=12, pady=(10, 8))
 
-    ctk.CTkLabel(
+    av_title_lbl = ctk.CTkLabel(
         av_card, text="💖  My Main Avatars (Priority Highlighting)",
         font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
         text_color=_PALETTE["accent_pink"],
-    ).pack(anchor="w")
+    )
+    av_title_lbl.pack(anchor="w")
 
-    ctk.CTkLabel(
+    av_desc_lbl = ctk.CTkLabel(
         av_card, text="Enter your main avatar names separated by commas (e.g. Mayo, Shinano, Manuka, Kikyo).\nCompatible clothes and hairs will get special heart badges and priority notes in READMEs!",
         font=ctk.CTkFont(family="Segoe UI", size=10),
         text_color=_PALETTE["muted"], justify="left",
-    ).pack(anchor="w", pady=(2, 6))
+    )
+    av_desc_lbl.pack(anchor="w", pady=(2, 6))
 
     saved_av_list = mem.get("main_avatars", ["Mayo", "Shinano", "Manuka"])
     main_av_var = ctk.StringVar(value=", ".join(saved_av_list))
@@ -2056,16 +2073,18 @@ def launch_gui() -> None:
         m["enable_dependencies"] = dep_var.get()
         save_nyahako_memory(m, Path(dest_var.get()) if dest_var.get() else None)
 
-    ctk.CTkSwitch(
+    dep_switch = ctk.CTkSwitch(
         dep_card, text="🏷️  Auto-Detect Shader & Framework Requirements",
         font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
         progress_color=_PALETTE["accent_lav"], variable=dep_var, command=_on_dep_toggle,
-    ).pack(anchor="w")
+    )
+    dep_switch.pack(anchor="w")
 
-    ctk.CTkLabel(
+    dep_desc_lbl = ctk.CTkLabel(
         dep_card, text="Scans for lilToon, Poiyomi, Modular Avatar, and VRCFury, stamping notes in README.md",
         font=ctk.CTkFont(family="Segoe UI", size=10), text_color=_PALETTE["muted"],
-    ).pack(anchor="w", padx=30, pady=(2, 0))
+    )
+    dep_desc_lbl.pack(anchor="w", padx=30, pady=(2, 0))
 
     # 3. Storage Saver Mode
     stor_card = ctk.CTkFrame(tab_settings, fg_color="transparent")
@@ -2078,26 +2097,29 @@ def launch_gui() -> None:
         m["storage_mode"] = "move" if stor_var.get() else "copy"
         save_nyahako_memory(m, Path(dest_var.get()) if dest_var.get() else None)
 
-    ctk.CTkSwitch(
+    stor_switch = ctk.CTkSwitch(
         stor_card, text="⚡  Fast Move / Storage Saver Mode",
         font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
         progress_color=_PALETTE["accent_mint"], variable=stor_var, command=_on_stor_toggle,
-    ).pack(anchor="w")
+    )
+    stor_switch.pack(anchor="w")
 
-    ctk.CTkLabel(
+    stor_desc_lbl = ctk.CTkLabel(
         stor_card, text="Moves files instead of copying to save disk space and eliminate file copy times",
         font=ctk.CTkFont(family="Segoe UI", size=10), text_color=_PALETTE["muted"],
-    ).pack(anchor="w", padx=30, pady=(2, 0))
+    )
+    stor_desc_lbl.pack(anchor="w", padx=30, pady=(2, 0))
 
     # 4. Active Unity Project Assets Path
     proj_card = ctk.CTkFrame(tab_settings, fg_color="transparent")
     proj_card.pack(fill="x", padx=12, pady=8)
 
-    ctk.CTkLabel(
+    proj_title_lbl = ctk.CTkLabel(
         proj_card, text="🎮  Active Unity Project (Assets Folder)",
         font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
         text_color=_PALETTE["accent_blue"],
-    ).pack(anchor="w")
+    )
+    proj_title_lbl.pack(anchor="w")
 
     proj_var = ctk.StringVar(value=mem.get("unity_project", ""))
 
@@ -2115,12 +2137,13 @@ def launch_gui() -> None:
             m["unity_project"] = d
             save_nyahako_memory(m, Path(dest_var.get()) if dest_var.get() else None)
 
-    ctk.CTkButton(
+    proj_browse_btn = ctk.CTkButton(
         p_row, text="Browse", width=75, height=34,
         fg_color=_PALETTE["accent_blue"], text_color="#1a1a2e",
         font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
         command=_pick_unity_project,
-    ).pack(side="right")
+    )
+    proj_browse_btn.pack(side="right")
 
     def _open_unity_project():
         p = proj_var.get().strip()
@@ -2129,41 +2152,107 @@ def launch_gui() -> None:
         else:
             messagebox.showwarning("Nyahako", "Please configure a valid Unity Project folder first!")
 
-    ctk.CTkButton(
+    proj_open_btn = ctk.CTkButton(
         proj_card, text="📂 Open Unity Project Folder in Explorer",
         font=ctk.CTkFont(family="Segoe UI", size=11),
         fg_color=_PALETTE["border"], text_color=_PALETTE["fg"],
         hover_color=_PALETTE["card"], height=30, command=_open_unity_project,
-    ).pack(anchor="w", pady=(6, 0))
+    )
+    proj_open_btn.pack(anchor="w", pady=(6, 0))
 
     # 5. Theme Palette Picker
     theme_card = ctk.CTkFrame(tab_settings, fg_color="transparent")
     theme_card.pack(fill="x", padx=12, pady=12)
 
-    ctk.CTkLabel(
+    theme_title_lbl = ctk.CTkLabel(
         theme_card, text="🎨  Pastel Theme Palette",
         font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
         text_color=_PALETTE["accent_lav"],
-    ).pack(anchor="w", pady=(0, 4))
+    )
+    theme_title_lbl.pack(anchor="w", pady=(0, 4))
 
     theme_names = [t["name"] for t in _THEMES.values()]
     theme_key_map = {t["name"]: k for k, t in _THEMES.items()}
     curr_theme_name = _THEMES.get(curr_theme, _THEMES["lavender"])["name"]
     theme_var = ctk.StringVar(value=curr_theme_name)
 
+    def apply_instant_theme(k: str):
+        if k not in _THEMES:
+            return
+        _PALETTE.update(_THEMES[k])
+
+        # 1. Main window & header
+        app.configure(fg_color=_PALETTE["bg"])
+        header_frame.configure(fg_color=_PALETTE["card"], border_color=_PALETTE["border"])
+        header_sub_lbl.configure(text_color=_PALETTE["accent_pink"])
+        ascii_cat_lbl.configure(text_color=_PALETTE["accent_lav"])
+
+        # 2. Main Tabview
+        tabview.configure(
+            fg_color=_PALETTE["card"],
+            segmented_button_selected_color=_PALETTE["accent_lav"],
+            segmented_button_selected_hover_color=_PALETTE["btn_hover"],
+            segmented_button_unselected_color=_PALETTE["border"],
+        )
+
+        # 3. Sorter Tab
+        dnd_hint_lbl.configure(text_color=_PALETTE["accent_pink"])
+        for btn, accent_key, lbl in folder_widgets:
+            btn.configure(fg_color=_PALETTE[accent_key], hover_color=_PALETTE["btn_hover"])
+            lbl.configure(text_color=_PALETTE["muted"])
+
+        progress_bar.configure(fg_color=_PALETTE["progress_bg"], progress_color=_PALETTE["progress"])
+        sort_btn.configure(fg_color=_PALETTE["accent_lav"], hover_color=_PALETTE["accent_pink"])
+        preview_btn.configure(border_color=_PALETTE["accent_blue"], text_color=_PALETTE["accent_blue"], hover_color=_PALETTE["border"])
+
+        console_frame.configure(fg_color=_PALETTE["console_bg"])
+        console.configure(fg_color=_PALETTE["console_bg"], text_color=_PALETTE["console_fg"])
+
+        override_frame.configure(fg_color=_PALETTE["border"])
+        override_title_lbl.configure(text_color=_PALETTE["accent_pink"])
+        single_path_lbl.configure(text_color=_PALETTE["muted"])
+        pick_file_btn.configure(fg_color=_PALETTE["accent_mint"], hover_color=_PALETTE["btn_hover"])
+        cat_menu.configure(
+            fg_color=_PALETTE["card"],
+            button_color=_PALETTE["accent_lav"],
+            button_hover_color=_PALETTE["btn_hover"],
+            text_color=_PALETTE["fg"],
+        )
+        detected_lbl.configure(text_color=_PALETTE["muted"])
+        sort_single_btn.configure(fg_color=_PALETTE["accent_mint"], hover_color=_PALETTE["btn_hover"])
+
+        # 4. Settings Tab
+        av_title_lbl.configure(text_color=_PALETTE["accent_pink"])
+        av_desc_lbl.configure(text_color=_PALETTE["muted"])
+        dep_switch.configure(progress_color=_PALETTE["accent_lav"])
+        dep_desc_lbl.configure(text_color=_PALETTE["muted"])
+        stor_switch.configure(progress_color=_PALETTE["accent_mint"])
+        stor_desc_lbl.configure(text_color=_PALETTE["muted"])
+        proj_title_lbl.configure(text_color=_PALETTE["accent_blue"])
+        proj_browse_btn.configure(fg_color=_PALETTE["accent_blue"], hover_color=_PALETTE["btn_hover"])
+        proj_open_btn.configure(fg_color=_PALETTE["border"], text_color=_PALETTE["fg"], hover_color=_PALETTE["card"])
+        theme_title_lbl.configure(text_color=_PALETTE["accent_lav"])
+        theme_menu.configure(
+            fg_color=_PALETTE["border"],
+            button_color=_PALETTE["accent_lav"],
+            button_hover_color=_PALETTE["btn_hover"],
+        )
+
     def _on_theme_select(chosen_name: str):
         k = theme_key_map.get(chosen_name, "lavender")
         m = load_nyahako_memory()
         m["theme"] = k
         save_nyahako_memory(m, Path(dest_var.get()) if dest_var.get() else None)
-        messagebox.showinfo("Nyahako 🐾", f"✨ Palette set to '{chosen_name}'!\nRestart Nyahako to apply all colors smoothly.")
+        apply_instant_theme(k)
+        log(f"🎨 [Theme] Switched palette to '{chosen_name}' instantly! ✨")
 
-    ctk.CTkOptionMenu(
+    theme_menu = ctk.CTkOptionMenu(
         theme_card, values=theme_names, variable=theme_var,
         fg_color=_PALETTE["border"], button_color=_PALETTE["accent_lav"],
         text_color="#e8d5f0", button_hover_color=_PALETTE["btn_hover"],
         command=_on_theme_select, height=34,
-    ).pack(fill="x")
+    )
+    theme_menu.pack(fill="x")
 
     # ── Drag and Drop Hook ───────────────────────────────────────────────────
     def _on_window_drop(files):
